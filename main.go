@@ -73,11 +73,11 @@ func main() {
 
 	query := fmt.Sprintf(`
 		SELECT 
-			x509_commonName(c.CERTIFICATE) AS common_name,
+			COALESCE(x509_commonName(c.CERTIFICATE), '') AS common_name,
 			c.ID,
-			ca.name AS issuer_name,
-			x509_notBefore(c.CERTIFICATE) AS issued_date,
-			x509_notAfter(c.CERTIFICATE) AS expiry_date
+			COALESCE(ca.name, '') AS issuer_name,
+			COALESCE(x509_notBefore(c.CERTIFICATE), '1970-01-01'::timestamp) AS issued_date,
+			COALESCE(x509_notAfter(c.CERTIFICATE), '1970-01-01'::timestamp) AS expiry_date
 		FROM 
 			certificate c
 		JOIN
