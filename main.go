@@ -1,0 +1,136 @@
+package main
+
+import (
+	"database/sql"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	_ "github.com/lib/pq"
+)
+
+type CertificateRecord struct {
+	CommonName string
+	CertID     int64
+	IssuedDate time.Time
+	ExpiryDate time.Time
+}
+
+func main() {
+	// Command-line flags
+	top := flag.Int("top", 10, "Number of latest records to return")
+	domain := flag.String("domain", "google.com", "Domain name to query")
+	filter := flag.String("filter", "", "Filter string to match in the common name (e.g., 'rest')")
+	output := flag.String("output", "", "Output filename for Markdown table (e.g., 'results.md')")
+	flag.Parse()
+
+	if *top <= 0 {
+		*top = 10 // Default to 10 if invalid input
+	}
+
+	// Connection details for crt.sh
+	// Host: crt.sh, Port: 5432, User: guest, Database: certwatch
+	connStr := "host=crt.sh port=5432 user=guest dbname=certwatch sslmode=disable"
+
+	fmt.Println("Connecting to crt.sh PostgreSQL...")
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatalf("Error opening database: %v", err)
+	}
+	defer db.Close()
+
+	// Test connection
+	err = db.Ping()
+	if err != nil {
+		log.Fatalf("Error connecting to database: %v", err)
+	}
+	fmt.Println("Successfully connected to crt.sh!")
+
+	// Query for certificates using the new Full Text Search (FTS) approach
+	fmt.Printf("\nQuerying for certificates matching: %s (using FTS, top %d)...\n", *domain, *top)
+	if *filter != "" {
+		fmt.Printf("Applying filter: %s\n", *filter)
+	}
+
+	// Using identities() and to_tsquery() as recommended for the new schema
+	// Added ORDER BY x509_notBefore(c.CERTIFICATE) DESC to get the latest records
+	// Added optional filter on x509_commonName
+	filterClause := ""
+	if *filter != "" {
+		filterClause = fmt.Sprintf("AND x509_commonName(c.CERTIFICATE) ILIKE '%%%s%%'", *filter)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			x509_commonName(c.CERTIFICATE) AS common_name,
+			c.ID,
+			x509_notBefore(c.CERTIFICATE) AS issued_date,
+			x509_notAfter(c.CERTIFICATE) AS expiry_date
+		FROM 
+			certificate c
+		WHERE 
+			to_tsquery('certwatch', '%s:*') @@ identities(c.CERTIFICATE)
+			%s
+		ORDER BY x509_notBefore(c.CERTIFICATE) DESC
+		LIMIT %d;
+	`, *domain, filterClause, *top)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Fatalf("Error executing query: %v", err)
+	}
+	defer rows.Close()
+
+	var records []CertificateRecord
+	for rows.Next() {
+		var rec CertificateRecord
+		if err := rows.Scan(&rec.CommonName, &rec.CertID, &rec.IssuedDate, &rec.ExpiryDate); err != nil {
+			log.Fatalf("Error scanning row: %v", err)
+		}
+		records = append(records, rec)
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Fatalf("Error iterating rows: %v", err)
+	}
+
+	// Print to console
+	fmt.Printf("\nResults (Top %d Recent Certificates for %s):\n", *top, *domain)
+	fmt.Printf("%-40s | %-10s | %-20s | %-20s\n", "Common Name", "Cert ID", "Issued Date", "Expiry Date")
+	fmt.Println("------------------------------------------------------------------------------------------------------------")
+
+	for _, rec := range records {
+		fmt.Printf("%-40s | %-10d | %-20s | %-20s\n", rec.CommonName, rec.CertID, rec.IssuedDate.Format("2006-01-02"), rec.ExpiryDate.Format("2006-01-02"))
+	}
+
+	// Output to Markdown file if requested
+	if *output != "" {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# Certificate Search Results for %s\n\n", *domain))
+		sb.WriteString(fmt.Sprintf("- **Query Date:** %s\n", time.Now().Format("2006-01-02 15:04:05")) )
+		if *filter != "" {
+			sb.WriteString(fmt.Sprintf("- **Filter:** `%s`\n", *filter))
+		}
+		sb.WriteString(fmt.Sprintf("- **Top Records:** %d\n\n", *top))
+
+		sb.WriteString("| Common Name | Cert ID | Issued Date | Expiry Date |\n")
+		sb.WriteString("| :--- | :--- | :--- | :--- |\n")
+
+		for _, rec := range records {
+			sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n", 
+				rec.CommonName, 
+				rec.CertID, 
+				rec.IssuedDate.Format("2006-01-02"), 
+				rec.ExpiryDate.Format("2006-01-02")))
+		}
+
+		err := os.WriteFile(*output, []byte(sb.String()), 0644)
+		if err != nil {
+			log.Fatalf("Error writing to output file: %v", err)
+		}
+		fmt.Printf("\nSuccessfully saved results to: %s\n", *output)
+	}
+}
