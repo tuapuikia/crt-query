@@ -16,6 +16,7 @@ import (
 type CertificateRecord struct {
 	CommonName string
 	CertID     int64
+	IssuerName string
 	IssuedDate time.Time
 	ExpiryDate time.Time
 }
@@ -74,10 +75,13 @@ func main() {
 		SELECT 
 			x509_commonName(c.CERTIFICATE) AS common_name,
 			c.ID,
+			ca.name AS issuer_name,
 			x509_notBefore(c.CERTIFICATE) AS issued_date,
 			x509_notAfter(c.CERTIFICATE) AS expiry_date
 		FROM 
 			certificate c
+		JOIN
+			ca ON c.issuer_ca_id = ca.id
 		WHERE 
 			to_tsquery('certwatch', '%s:*') @@ identities(c.CERTIFICATE)
 			%s
@@ -94,7 +98,7 @@ func main() {
 	var records []CertificateRecord
 	for rows.Next() {
 		var rec CertificateRecord
-		if err := rows.Scan(&rec.CommonName, &rec.CertID, &rec.IssuedDate, &rec.ExpiryDate); err != nil {
+		if err := rows.Scan(&rec.CommonName, &rec.CertID, &rec.IssuerName, &rec.IssuedDate, &rec.ExpiryDate); err != nil {
 			log.Fatalf("Error scanning row: %v", err)
 		}
 		records = append(records, rec)
@@ -106,31 +110,37 @@ func main() {
 
 	// Print to console
 	fmt.Printf("\nResults (Top %d Recent Certificates for %s):\n", *top, *domain)
-	fmt.Printf("%-40s | %-10s | %-20s | %-20s\n", "Common Name", "Cert ID", "Issued Date", "Expiry Date")
-	fmt.Println("------------------------------------------------------------------------------------------------------------")
+	fmt.Printf("%-40s | %-10s | %-30s | %-12s | %-12s\n", "Common Name", "Cert ID", "Issuer", "Issued Date", "Expiry Date")
+	fmt.Println(strings.Repeat("-", 120))
 
 	for _, rec := range records {
-		fmt.Printf("%-40s | %-10d | %-20s | %-20s\n", rec.CommonName, rec.CertID, rec.IssuedDate.Format("2006-01-02"), rec.ExpiryDate.Format("2006-01-02"))
+		fmt.Printf("%-40s | %-10d | %-30.30s | %-12s | %-12s\n",
+			rec.CommonName,
+			rec.CertID,
+			rec.IssuerName,
+			rec.IssuedDate.Format("2006-01-02"),
+			rec.ExpiryDate.Format("2006-01-02"))
 	}
 
 	// Output to Markdown file if requested
 	if *output != "" {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("# Certificate Search Results for %s\n\n", *domain))
-		sb.WriteString(fmt.Sprintf("- **Query Date:** %s\n", time.Now().Format("2006-01-02 15:04:05")) )
+		sb.WriteString(fmt.Sprintf("- **Query Date:** %s\n", time.Now().Format("2006-01-02 15:04:05")))
 		if *filter != "" {
 			sb.WriteString(fmt.Sprintf("- **Filter:** `%s`\n", *filter))
 		}
 		sb.WriteString(fmt.Sprintf("- **Top Records:** %d\n\n", *top))
 
-		sb.WriteString("| Common Name | Cert ID | Issued Date | Expiry Date |\n")
-		sb.WriteString("| :--- | :--- | :--- | :--- |\n")
+		sb.WriteString("| Common Name | Cert ID | Issuer | Issued Date | Expiry Date |\n")
+		sb.WriteString("| :--- | :--- | :--- | :--- | :--- |\n")
 
 		for _, rec := range records {
-			sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s |\n", 
-				rec.CommonName, 
-				rec.CertID, 
-				rec.IssuedDate.Format("2006-01-02"), 
+			sb.WriteString(fmt.Sprintf("| %s | %d | %s | %s | %s |\n",
+				rec.CommonName,
+				rec.CertID,
+				rec.IssuerName,
+				rec.IssuedDate.Format("2006-01-02"),
 				rec.ExpiryDate.Format("2006-01-02")))
 		}
 
