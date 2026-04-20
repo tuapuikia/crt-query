@@ -56,7 +56,7 @@ func main() {
 	fmt.Println("Successfully connected to crt.sh!")
 
 	// Query for certificates using the new Full Text Search (FTS) approach
-	fmt.Printf("\nQuerying for certificates matching: %s (using FTS, top %d)...\n", *domain, *top)
+	fmt.Printf("\nQuerying for certificates strictly matching: %s (using FTS + strict domain filter, top %d)...\n", *domain, *top)
 	if *filter != "" {
 		fmt.Printf("Applying filter: %s\n", *filter)
 	}
@@ -83,11 +83,15 @@ func main() {
 		JOIN
 			ca ON c.issuer_ca_id = ca.id
 		WHERE 
-			to_tsquery('certwatch', '%s:*') @@ identities(c.CERTIFICATE)
+			to_tsquery('certwatch', '%s') @@ identities(c.CERTIFICATE)
+			AND (
+				x509_commonName(c.CERTIFICATE) ILIKE '%%.' || '%s'
+				OR x509_commonName(c.CERTIFICATE) = '%s'
+			)
 			%s
 		ORDER BY x509_notBefore(c.CERTIFICATE) DESC
 		LIMIT %d;
-	`, safeDomain, filterClause, *top)
+	`, safeDomain, safeDomain, safeDomain, filterClause, *top)
 
 	rows, err := db.Query(query)
 	if err != nil {

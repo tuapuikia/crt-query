@@ -22,14 +22,14 @@ CGO_ENABLED=0 go build -o crt-query main.go
 Run the binary with the desired flags:
 
 ```bash
-./crt-query -domain google.com -top 5 -output results.md
+./crt-query -domain example.com -top 5 -output results.md
 ```
 
 ### Options
 
 | Flag | Description | Default |
 | :--- | :--- | :--- |
-| `-domain` | The domain name to query for certificates. | `google.com` |
+| `-domain` | The domain name to query for certificates. | `example.com` |
 | `-top` | Number of latest records to return. | `10` |
 | `-filter` | A string to filter the common name (e.g., 'api'). | (empty) |
 | `-output` | Filename to save results as a Markdown table. | (empty) |
@@ -37,7 +37,7 @@ Run the binary with the desired flags:
 ## Example
 
 ```bash
-./crt-query -domain google.com -filter www -top 3
+./crt-query -domain example.com -filter www -top 3
 ```
 
-This will search for the top 3 latest certificates for `google.com` that contain `www` in their common name and print them to the console.
+This will search for the top 3 latest certificates for `example.com` that contain `www` in their common name and print them to the console.
