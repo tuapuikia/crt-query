@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,10 @@ type CertificateRecord struct {
 	CertID     int64
 	IssuedDate time.Time
 	ExpiryDate time.Time
+}
+
+func sanitize(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 func main() {
@@ -58,9 +63,11 @@ func main() {
 	// Using identities() and to_tsquery() as recommended for the new schema
 	// Added ORDER BY x509_notBefore(c.CERTIFICATE) DESC to get the latest records
 	// Added optional filter on x509_commonName
+	// Note: crt.sh does not support unnamed prepared statements, so we use sanitized string interpolation.
+	safeDomain := sanitize(*domain)
 	filterClause := ""
 	if *filter != "" {
-		filterClause = fmt.Sprintf("AND x509_commonName(c.CERTIFICATE) ILIKE '%%%s%%'", *filter)
+		filterClause = fmt.Sprintf("AND x509_commonName(c.CERTIFICATE) ILIKE '%%%s%%'", sanitize(*filter))
 	}
 
 	query := fmt.Sprintf(`
@@ -76,7 +83,7 @@ func main() {
 			%s
 		ORDER BY x509_notBefore(c.CERTIFICATE) DESC
 		LIMIT %d;
-	`, *domain, filterClause, *top)
+	`, safeDomain, filterClause, *top)
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -127,10 +134,11 @@ func main() {
 				rec.ExpiryDate.Format("2006-01-02")))
 		}
 
-		err := os.WriteFile(*output, []byte(sb.String()), 0644)
+		safeOutput := filepath.Base(*output)
+		err := os.WriteFile(safeOutput, []byte(sb.String()), 0644)
 		if err != nil {
 			log.Fatalf("Error writing to output file: %v", err)
 		}
-		fmt.Printf("\nSuccessfully saved results to: %s\n", *output)
+		fmt.Printf("\nSuccessfully saved results to: %s\n", safeOutput)
 	}
 }
