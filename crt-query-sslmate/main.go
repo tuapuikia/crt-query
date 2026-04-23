@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,12 +32,34 @@ type Issuer struct {
 	FriendlyName string `json:"friendly_name"`
 }
 
+func escapeMarkdown(s string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"`", "\\`",
+		"*", "\\*",
+		"_", "\\_",
+		"{", "\\{",
+		"}", "\\}",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(s)
+}
+
 func saveMarkdown(filename string, domain string, issuances []Issuance) {
 	if filename == "" || len(issuances) == 0 {
 		return
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# SSLMate Certificate Search Results for %s\n\n", domain))
+	escapedDomain := escapeMarkdown(domain)
+	sb.WriteString(fmt.Sprintf("# SSLMate Certificate Search Results for %s\n\n", escapedDomain))
 	sb.WriteString(fmt.Sprintf("- **Query Date:** %s\n", time.Now().Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("- **Total Records:** %d\n\n", len(issuances)))
 
@@ -94,18 +117,18 @@ func main() {
 	var allIssuances []Issuance
 
 	for {
-		params := []string{
-			fmt.Sprintf("domain=%s", *domainPtr),
-			fmt.Sprintf("include_subdomains=%t", *subdomainsPtr),
-			fmt.Sprintf("match_wildcards=%t", *wildcardsPtr),
-			"expand=dns_names",
-			"expand=issuer",
-		}
+		params := url.Values{}
+		params.Add("domain", *domainPtr)
+		params.Add("include_subdomains", strconv.FormatBool(*subdomainsPtr))
+		params.Add("match_wildcards", strconv.FormatBool(*wildcardsPtr))
+		params.Add("expand", "dns_names")
+		params.Add("expand", "issuer")
+
 		if afterID != "" {
-			params = append(params, fmt.Sprintf("after=%s", afterID))
+			params.Add("after", afterID)
 		}
 
-		url := fmt.Sprintf("%s?%s", baseURL, strings.Join(params, "&"))
+		url := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
 		var resp *http.Response
 
